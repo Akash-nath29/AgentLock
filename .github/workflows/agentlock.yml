@@ -1,0 +1,23 @@
+name: agentlock
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  behavior:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+      - name: Behavioral contracts (demo agent)
+        working-directory: demo
+        # No Ollama in CI, so the rule contracts run and the Gemma-judged ones are skipped.
+        # Point OLLAMA_HOST (and OLLAMA_API_KEY) at a reachable Ollama server to judge them too.
+        # In your own repo, commit .agentlock/baseline.json and use `agentlock test --compare`.
+        run: agentlock test
