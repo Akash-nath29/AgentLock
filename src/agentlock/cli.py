@@ -11,7 +11,7 @@ from rich.console import Console
 
 from agentlock.adapters import get_adapter
 from agentlock.behavior import BehaviorBasis, BehaviorState, reduce_scenario_traces
-from agentlock.deps import DependencyClosure, ModelDep, ToolDep
+from agentlock.deps import ConfigDep, DependencyClosure, ModelDep, PromptDep, SkillDep, ToolDep
 from agentlock.diff import compute_diff
 from agentlock.events import NormalizedTrace, normalize_event_stream
 from agentlock.invariants import mine_invariants
@@ -135,6 +135,68 @@ def _run_capture_internal(manifest: AgentManifest, cwd: Path) -> tuple[LockfileV
     mined_dicts = [m.model_dump() for m in mined]
 
     # Build dependency closure records
+    prompt_deps = []
+    prompts_map = manifest.dependencies.get("prompts", {})
+    if isinstance(prompts_map, dict):
+        for p_name, p_file in prompts_map.items():
+            if isinstance(p_file, str):
+                p_path = cwd / p_file
+                if p_path.exists():
+                    p_content = p_path.read_text(encoding="utf-8")
+                    p_digest = store.put(p_content)
+                    prompt_deps.append(
+                        PromptDep(
+                            id=f"prompt.{p_name}",
+                            sha256=p_digest,
+                            object=p_digest,
+                            source={"file": p_file},
+                            dep_class="reproducible",
+                        )
+                    )
+
+    skill_deps = []
+    skills_map = manifest.dependencies.get("skills", {})
+    if isinstance(skills_map, dict):
+        for s_name, s_file in skills_map.items():
+            if isinstance(s_file, str):
+                s_path = cwd / s_file
+                if s_path.exists():
+                    s_content = s_path.read_text(encoding="utf-8")
+                    s_digest = store.put(s_content)
+                    skill_deps.append(
+                        SkillDep(
+                            id=f"skill.{s_name}",
+                            sha256=s_digest,
+                            object=s_digest,
+                            source={"file": s_file},
+                            dep_class="reproducible",
+                        )
+                    )
+
+    config_deps = []
+    cfg_spec = manifest.dependencies.get("config", {})
+    if isinstance(cfg_spec, dict) and "file" in cfg_spec:
+        c_file = cfg_spec["file"]
+        c_path = cwd / c_file
+        if c_path.exists():
+            c_content = c_path.read_text(encoding="utf-8")
+            c_digest = store.put(c_content)
+            try:
+                import yaml
+                c_vals = yaml.safe_load(c_content) if isinstance(yaml.safe_load(c_content), dict) else {}
+            except Exception:
+                c_vals = {}
+            config_deps.append(
+                ConfigDep(
+                    id="config.agent",
+                    sha256=c_digest,
+                    object=c_digest,
+                    values=c_vals,
+                    source={"file": c_file},
+                    dep_class="reproducible",
+                )
+            )
+
     tool_deps = []
     for t_dict in discovered.get("tools", []):
         t_name = t_dict.get("name", "")
@@ -158,7 +220,10 @@ def _run_capture_internal(manifest: AgentManifest, cwd: Path) -> tuple[LockfileV
 
     dep_closure = DependencyClosure(
         model=[model_dep],
+        prompts=prompt_deps,
+        skills=skill_deps,
         tools=tool_deps,
+        config=config_deps,
     )
     dep_closure.compute_fingerprint()
 

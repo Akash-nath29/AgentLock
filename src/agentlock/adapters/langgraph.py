@@ -16,6 +16,11 @@ class LangGraphAdapter(BaseAdapter):
         self.entrypoint_str: str = ""
 
     def load(self, entrypoint: str, options: dict[str, Any] | None = None) -> None:
+        import sys
+        from pathlib import Path
+        cwd_str = str(Path.cwd())
+        if cwd_str not in sys.path:
+            sys.path.insert(0, cwd_str)
         self.entrypoint_str = entrypoint
         mod_name, attr_name = entrypoint.split(":")
         mod = importlib.import_module(mod_name)
@@ -24,6 +29,10 @@ class LangGraphAdapter(BaseAdapter):
         self.graph = builder(**opts) if callable(builder) else builder
 
     def discover(self) -> dict[str, Any]:
+        if hasattr(self.graph, "spec"):
+            spec = self.graph.spec
+            return spec.model_dump() if hasattr(spec, "model_dump") else dict(spec)
+
         tools_list = []
         if hasattr(self.graph, "nodes") and "tools" in self.graph.nodes:
             tools_node = self.graph.nodes["tools"]
@@ -48,7 +57,9 @@ class LangGraphAdapter(BaseAdapter):
 
         reply = ""
         try:
-            if hasattr(self.graph, "invoke"):
+            if hasattr(self.graph, "run"):
+                reply = self.graph.run(scenario_input)
+            elif hasattr(self.graph, "invoke"):
                 res = self.graph.invoke({"messages": [("user", scenario_input)]})
                 if isinstance(res, dict) and "messages" in res:
                     msgs = res["messages"]
